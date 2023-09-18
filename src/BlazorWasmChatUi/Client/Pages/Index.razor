@@ -1,0 +1,291 @@
+﻿@page "/"
+@using BlazorWasmChatUi.Client.Services;
+@using BlazorWasmChatUi.Shared;
+@inject OpenAiModelService _openAiService
+@inject IJSRuntime _jsRuntime
+@inject ILogger<Index> _logger
+
+
+<div class="row">
+
+    @* Content Area Begin *@
+    <div class="col-9">
+        @if (_currentChatContext?.Messages == null)
+        {
+            <div class="row justify-content-start me-5 my-3">
+                <div class="col-auto align-self-center rounded border">
+                   質問をしましょう。
+                </div>
+            </div>
+        }
+        else
+        {   
+            @foreach (var message in _currentChatContext.Messages)
+            {
+                if (message.Role == "user")
+                {
+                    <div class="row justify-content-end ms-5 my-3">
+                        <div class="col-auto align-self-center rounded border">
+                            @((MarkupString)ToHtmlContent(message.Content))
+                        </div>
+                    </div>
+                }
+                else if (message.Role == "assistant")
+                {
+                    <div class="row justify-content-start me-5 my-3">
+                        <div class="col-auto align-self-center rounded border">
+                            @((MarkupString)ToHtmlContent(message.Content))
+                        </div>
+                    </div>
+                }
+            }
+
+            @if (_isLoading)
+            {
+                <div class="row justify-content-center me-5">
+                    <div class="col-auto rounded border">
+                        <div class="spinner-border" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                    </div>
+                </div>
+            }
+        }
+    </div>
+    @* Content Area End *@
+
+    @* History Area Begin *@
+    <div class="col-3 position-fixed overflow-y-auto top-0 bottom-0"
+         style="padding-top: 60px; z-index: 100; right: 0;">
+
+        @if (_topics == null)
+        {
+            <p><em>Loading...</em></p>
+        }
+        else
+        {
+            <ul class="list-group">
+            @foreach (var topic in _topics)
+            {
+                if (string.IsNullOrWhiteSpace(topic.Id) || topic.Title == null)
+                {
+                    continue;
+                }
+
+                    var listClassIfIsActive = _currentChatContext == topic ? "list-group-item-primary" : "";
+
+                    <li class="list-group-item d-flex justify-content-between @listClassIfIsActive">
+                        <a class="btn" @onclick="(s => SetCurrentTopic(topic.Id))">@(topic.Title.Length > 18 ? topic.Title.Substring(0, 18) : topic.Title)</a>
+                        <a class="btn btn-primary" type="button" @onclick="(s => DeleteTopic(topic))"><i class="bi bi-trash3"></i></a>
+                    </li>
+            }
+            </ul>
+        }        
+
+    </div>
+    @* History Area End *@
+
+</div>
+
+@* Spacer Begin *@
+<div style="height: 120px"></div>
+@* Spacer End *@
+
+@* Chat input Area Begin *@
+<div class="fixed-bottom container">
+    <div class="m-3 container">
+        <div class="row">
+            <div class="col-9">
+                <div class="row g-1 justify-content-center align-items-end">
+                    <div class="col-auto p-3">
+                        <button class="btn btn-primary float-right" type="button" @onclick="ClearCurrentTopic">New topic</button>
+                    </div>
+                    <div class="col-8 p-3">
+                        <InputTextArea @ref="_textAreaUserMessage" @bind-Value="_inputMessage" @onkeydown="@SubmitOnEnter" rows="1" class="form-control" placeholder="質問を入れてください。" />
+                    </div>
+                    <div class="col-auto p-3">
+                        <button @ref="_btnSendUserMessage" class="btn btn-primary" type="button" @onclick="SubmitAsync">Submit</button>
+                    </div>
+                </div>
+            </div>
+        </div>        
+    </div>
+</div>
+@* Chat input Area End *@
+
+
+
+@code {
+    private ChatContext? _currentChatContext { get; set; }
+    private List<ChatContext>? _topics { get; set; }
+
+    private bool _isLoading = false;   
+
+    // TODO: retry, contextLengthExceeded
+
+    private string _inputMessage { get; set; } = string.Empty;
+    private string _onInputedMessage { get; set; } = string.Empty;
+
+    private ElementReference _btnSendUserMessage;
+    private InputTextArea _textAreaUserMessage;
+    
+
+    protected override async Task OnInitializedAsync()
+    {
+        var topics = await _openAiService.GetTopicsAsync(default);
+        _topics = topics?.ToList() ?? new List<ChatContext>();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            return;
+        }
+
+        await _jsRuntime.InvokeVoidAsync("scrollToBottom");
+    }
+
+    private async Task SubmitAsync()
+    {
+        await this.SubmitAsync(_inputMessage);
+    }
+
+    private async Task SubmitAsync(string userMessage)
+    {
+        CancellationToken cancellationToken = default;        
+
+        _logger.LogTrace("inputMessage = {userMessage}", userMessage);
+
+        if (string.IsNullOrWhiteSpace(userMessage))
+        {
+            return;
+        }
+
+        if (_currentChatContext == null)
+        {
+            _currentChatContext = new ChatContext()
+            {
+                Id = Guid.NewGuid().ToString(),
+                CreatedDateTime = DateTimeOffset.Now,
+                UpdatedDateTime = DateTimeOffset.Now,
+                Messages = new List<ChatMessage>(),
+            };
+
+            _topics?.Insert(0, _currentChatContext);
+        }
+
+        // ユーザーメッセージを追加
+        _currentChatContext.Messages?.Add(new ChatMessage()
+        { 
+            Id = Guid.NewGuid().ToString(),
+            Content = userMessage,
+            Role = "user",
+            CreatedDateTime = DateTimeOffset.Now,
+        });
+
+        // 入力メッセージを初期化 
+        _inputMessage = string.Empty;
+
+        // ロード中の表示
+        _isLoading = true;
+
+        // 状態の変更を通知
+        this.StateHasChanged();
+
+        // モデルからの返信メッセージ
+        ChatMessage? replyMessage = null;
+
+        try
+        {
+            var messages = _currentChatContext.Messages.Where(m => m.Role != "loading").ToArray();
+            replyMessage = await _openAiService.PostAsync(messages);
+
+            // 生成されたメッセージの追加
+            _currentChatContext.Messages.Add(replyMessage);
+            // 最初のユーザーメッセージでコンテキストのタイトルを初期化
+            _currentChatContext.Title ??= messages?.FirstOrDefault(m => m.Role == "user")?.Content;
+            // 生成された時間で、コンテキストの更新時間を更新
+            _currentChatContext.UpdatedDateTime = replyMessage.CreatedDateTime;
+            // トピックを保存
+            await _openAiService.SaveTopicAsync(_currentChatContext, cancellationToken);
+
+        }
+        catch(Exception e)
+        {
+            _logger.LogWarning("_openAiService.PostAsync is errored. {errorMessage}", e.Message);
+        }
+        finally
+        {
+            _logger.LogInformation("replyMessage.Content = {Content}", replyMessage?.Content);
+            _isLoading = false;
+        }
+
+        this.StateHasChanged();
+    }
+
+    public class Message
+    {
+        public string? Id { get; set; }
+        public string? Role { get; set; }
+        public string? Content { get; set; }
+    }
+
+    public class InputMessage
+    {
+        public string? Id { get; set; }
+        public string? Content { get; set; }
+    }
+
+    public string ToHtmlContent(string? content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return string.Empty;
+        }
+
+        return Markdig.Markdown.ToHtml(content);
+    }
+
+    private async Task ScrollToBottom()
+    {
+        await _jsRuntime.InvokeVoidAsync("scrollToBottom");
+    }
+
+    private async Task SubmitOnEnter(KeyboardEventArgs e)
+    {       
+
+        if ((e.Key == "Enter" || e.Key == "NumpadEnter")
+          && (!e.ShiftKey && !e.AltKey))
+        {
+            await _btnSendUserMessage.FocusAsync(true);
+            await SubmitAsync();
+
+            await _textAreaUserMessage.Element.Value.FocusAsync(true);
+        }
+    }
+
+    private void SetCurrentTopic(string topicId)
+    {
+        var topic = _topics?.Where(t => t.Id == topicId).FirstOrDefault();
+
+        _currentChatContext = topic;
+    }
+
+    private async Task DeleteTopic(ChatContext topic)
+    {
+        await _openAiService.DeleteTopicAsync(topic, default);
+
+        _topics?.Remove(topic);
+
+        if (topic == _currentChatContext)
+        {
+            this.ClearCurrentTopic();
+        }
+    }
+
+    private void ClearCurrentTopic()
+    {
+        _currentChatContext = null;
+    }
+}
