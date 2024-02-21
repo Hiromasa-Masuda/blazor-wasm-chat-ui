@@ -1,7 +1,5 @@
-﻿using Azure.AI.OpenAI;
-using BlazorWasmChatUi.Shared;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.SemanticKernel.AI.ChatCompletion;
+﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.SemanticKernel.ChatCompletion;
 
 namespace BlazorWasmChatUi.Server.Controllers;
 
@@ -9,14 +7,14 @@ namespace BlazorWasmChatUi.Server.Controllers;
 [Route("[controller]")]
 public class OpenAiModelController : ControllerBase
 {
-    private readonly IChatCompletion _chatCompletion;    
+    private readonly IChatCompletionService _chatCompletionService;
     private readonly ILogger<OpenAiModelController> _logger;
 
     public OpenAiModelController(
-        IChatCompletion chatCompletion,
+        IChatCompletionService chatCompletionService,
         ILogger<OpenAiModelController> logger)
     {
-        _chatCompletion = chatCompletion;
+        _chatCompletionService = chatCompletionService;
         _logger = logger;
     }
 
@@ -26,11 +24,11 @@ public class OpenAiModelController : ControllerBase
         if (messages == null || messages.Length == 0) 
         {
             return BadRequest();
-        }
+        }        
 
-        var history = _chatCompletion.CreateNewChat();
+        ChatHistory history = [];
 
-        foreach (var message in messages) 
+        foreach (var message in messages)
         {
             if (message?.Role == null || message.Content == null)
             {
@@ -68,9 +66,10 @@ public class OpenAiModelController : ControllerBase
 
         try
         {
-            replyMessage = await _chatCompletion.GenerateMessageAsync(history);
+            var chatMessageContent = await _chatCompletionService.GetChatMessageContentAsync(history);
+            replyMessage = chatMessageContent.Content;
         }
-        catch(Microsoft.SemanticKernel.Diagnostics.HttpOperationException e) 
+        catch(Microsoft.SemanticKernel.HttpOperationException e) 
         {
             if (e.InnerException is Azure.RequestFailedException innerEx)
             {
@@ -92,7 +91,7 @@ public class OpenAiModelController : ControllerBase
             return NotFound();
         }
 
-        var replyChatMessage = new Shared.ChatMessage()
+        Shared.ChatMessage replyChatMessage = new()
         {
             Id = Guid.NewGuid().ToString(),
             Role = "assistant",

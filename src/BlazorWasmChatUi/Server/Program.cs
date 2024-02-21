@@ -1,8 +1,8 @@
-using Microsoft.AspNetCore.ResponseCompression;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.SemanticKernel;
-using Microsoft.SemanticKernel.AI.ChatCompletion;
+using Azure.Core.Diagnostics;
 using BlazorWasmChatUi.Server.DataGateway;
+using Microsoft.SemanticKernel;
+using Microsoft.SemanticKernel.ChatCompletion;
+using System.Diagnostics.Tracing;
 
 namespace BlazorWasmChatUi;
 
@@ -14,7 +14,7 @@ public class Program
 
         // Add services to the container.
         builder.Services.AddControllersWithViews();
-        builder.Services.AddRazorPages();            
+        builder.Services.AddRazorPages();
 
         builder.Services.AddSingleton(service =>
         {
@@ -28,16 +28,14 @@ public class Program
             var modelName = configuration["azOpenAi:modelName"]
                 ?? throw new InvalidOperationException("azOpenAi:modelName not defined.");
 
-            var kernal = Kernel.Builder
-                .WithAzureChatCompletionService(modelName, endpoint, key)
-                .WithLoggerFactory(loggerFactory)
-                .Build();
+            var kernalBuilder = Kernel.CreateBuilder();
+            kernalBuilder.Services.AddSingleton(loggerFactory);
+            kernalBuilder.AddAzureOpenAIChatCompletion(modelName, endpoint, key);
 
-            return kernal;
-            
+            return kernalBuilder.Build();            
         });
 
-        builder.Services.AddScoped(service => service.GetRequiredService<IKernel>().GetService<IChatCompletion>());
+        builder.Services.AddScoped(service => service.GetRequiredService<Kernel>().Services.GetRequiredService<IChatCompletionService>());
         builder.Services.AddSingleton<ITopicsDataGateway, TopicsAzBlobStorageDataGateway>();
 
         var app = builder.Build();
