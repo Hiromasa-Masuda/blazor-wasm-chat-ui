@@ -25,7 +25,7 @@
                 if (message.Role == "user")
                 {
                     <div class="row justify-content-end ms-5 my-3">
-                        <div class="col-auto align-self-center rounded border">
+                        <div class="col-auto align-self-center rounded border pt-3">
                             @((MarkupString)ToHtmlContent(message.Content))
                         </div>
                     </div>
@@ -33,7 +33,7 @@
                 else if (message.Role == "assistant")
                 {
                     <div class="row justify-content-start me-5 my-3">
-                        <div class="col-auto align-self-center rounded border">
+                        <div class="col-auto align-self-center rounded border pt-3">
                             @((MarkupString)ToHtmlContent(message.Content))
                         </div>
                     </div>
@@ -55,8 +55,8 @@
     @* Content Area End *@
 
     @* History Area Begin *@
-    <div class="col-3 position-fixed overflow-y-auto top-0 bottom-0"
-         style="padding-top: 60px; z-index: 100; right: 0;">
+    <div class="col-3 position-fixed overflow-y-auto top-0 bottom-0 z-3"
+         style="padding-top: 72px; right: 0;">
 
         @if (_topics == null)
         {
@@ -75,7 +75,7 @@
                     var listClassIfIsActive = _currentChatContext == topic ? "list-group-item-primary" : "";
 
                     <li class="list-group-item d-flex justify-content-between @listClassIfIsActive">
-                        <a class="btn" @onclick="(s => SetCurrentTopic(topic.Id))">@(topic.Title.Length > 18 ? topic.Title.Substring(0, 18) : topic.Title)</a>
+                        <a class="btn text-truncate" title="@topic.Title" @onclick="(s => SetCurrentTopic(topic.Id))">@topic.Title</a>
                         <a class="btn btn-primary" type="button" @onclick="(s => DeleteTopic(topic))"><i class="bi bi-trash3"></i></a>
                     </li>
             }
@@ -92,7 +92,7 @@
 @* Spacer End *@
 
 @* Chat input Area Begin *@
-<div class="fixed-bottom container">
+<div class="fixed-bottom container z-2">
     <div class="m-3 container">
         <div class="row">
             <div class="col-9">
