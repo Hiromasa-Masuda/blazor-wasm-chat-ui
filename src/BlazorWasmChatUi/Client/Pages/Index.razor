@@ -1,8 +1,10 @@
 ﻿@page "/"
 @using BlazorWasmChatUi.Client.Services;
 @using BlazorWasmChatUi.Shared;
+@implements IDisposable
 @inject OpenAiModelService _openAiService
 @inject IJSRuntime _jsRuntime
+@inject IConfiguration _configuration
 @inject ILogger<Index> _logger
 
 
@@ -118,8 +120,11 @@
 @code {
     private ChatContext? _currentChatContext { get; set; }
     private List<ChatContext>? _topics { get; set; }
+    private CancellationTokenSource _cancellationTokenSource = new();
 
-    private bool _isLoading = false;   
+    private bool _isStreamingResponseEnabled;
+
+    private bool _isLoading = false;
 
     // TODO: retry, contextLengthExceeded
 
@@ -128,12 +133,20 @@
 
     private ElementReference _btnSendUserMessage;
     private InputTextArea _textAreaUserMessage;
-    
+
 
     protected override async Task OnInitializedAsync()
     {
+        _isStreamingResponseEnabled = _configuration.GetValue<bool?>("isStreamingResponseEnabled") ?? false;
+
         var topics = await _openAiService.GetTopicsAsync(default);
         _topics = topics?.ToList() ?? new List<ChatContext>();
+    }
+
+    public void Dispose()
+    {
+        _cancellationTokenSource.Cancel();
+        _cancellationTokenSource.Dispose();
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -148,13 +161,11 @@
 
     private async Task SubmitAsync()
     {
-        await this.SubmitAsync(_inputMessage);
+        await this.SubmitAsync(_inputMessage, _cancellationTokenSource.Token);
     }
 
-    private async Task SubmitAsync(string userMessage)
+    private async Task SubmitAsync(string userMessage, CancellationToken cancellationToken)
     {
-        CancellationToken cancellationToken = default;        
-
         _logger.LogTrace("inputMessage = {userMessage}", userMessage);
 
         if (string.IsNullOrWhiteSpace(userMessage))
@@ -199,17 +210,43 @@
         try
         {
             var messages = _currentChatContext.Messages.Where(m => m.Role != "loading").ToArray();
-            replyMessage = await _openAiService.PostAsync(messages);
 
-            // 生成されたメッセージの追加
-            _currentChatContext.Messages.Add(replyMessage);
+            if (!_isStreamingResponseEnabled)
+            {
+                replyMessage = await _openAiService.PostAsync(messages, cancellationToken);
+
+                // 生成されたメッセージの追加
+                _currentChatContext.Messages.Add(replyMessage);
+            }
+            else
+            {
+                string? messageId = null;
+                string? messageRole = null;
+                DateTimeOffset? messageCreatedDateTime = null;
+
+                await _openAiService.PostStreamingAsync(messages,
+                (chatMessage, chunkedMessage) =>
+                {
+                    if (!this._currentChatContext.Messages.Contains(chatMessage))
+                    {
+                        _currentChatContext.Messages.Add(chatMessage);
+                    }
+                    
+                    this.StateHasChanged();
+
+                    replyMessage = chatMessage;
+                },
+                33,
+                cancellationToken);
+            }
+            
             // 最初のユーザーメッセージでコンテキストのタイトルを初期化
             _currentChatContext.Title ??= messages?.FirstOrDefault(m => m.Role == "user")?.Content;
             // 生成された時間で、コンテキストの更新時間を更新
             _currentChatContext.UpdatedDateTime = replyMessage.CreatedDateTime;
             // トピックを保存
             await _openAiService.SaveTopicAsync(_currentChatContext, cancellationToken);
-
+        
         }
         catch(Exception e)
         {

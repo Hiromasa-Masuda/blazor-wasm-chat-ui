@@ -7,8 +7,8 @@ This repository provides the code for a Chat UI developed using Blazor Webassemb
 - Azure OpenAI Service
 
 ## Installation 
-1. Create BlazorWasmChatUi\Server\appsettings.json.
-2. Please edit the appsettings.json as shown in the following example.
+1. Open BlazorWasmChatUi\Server\appsettings.json.
+2. Edit the appsettings.json as shown in the following example.
 
 ```json
 {
