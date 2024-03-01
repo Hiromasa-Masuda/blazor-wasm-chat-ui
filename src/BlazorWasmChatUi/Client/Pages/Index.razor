@@ -204,10 +204,7 @@
         _inputMessage = string.Empty;
 
         // ロード中の表示
-        _isLoading = true;
-
-        // 状態の変更を通知
-        this.StateHasChanged();
+        _isLoading = true;        
 
         // モデルからの返信メッセージ
         ChatMessage? replyMessage = null;
@@ -233,7 +230,10 @@
                         _renderingChatContext.Messages.Add(chatMessage);
                     }
 
-                    this.StateHasChanged();
+                    if (_currentChatContext == _renderingChatContext)
+                    {
+                        this.StateHasChanged();
+                    }                    
 
                     replyMessage = chatMessage;
                 },
@@ -258,9 +258,7 @@
             _isLoading = false;
             // 描画終了時に、初期化
             _renderingChatContext = null;
-        }
-
-        this.StateHasChanged();
+        }        
     }
 
     public class Message
