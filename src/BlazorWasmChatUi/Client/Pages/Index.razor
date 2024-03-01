@@ -221,10 +221,6 @@
             }
             else
             {
-                string? messageId = null;
-                string? messageRole = null;
-                DateTimeOffset? messageCreatedDateTime = null;
-
                 await _openAiService.PostStreamingAsync(messages,
                 (chatMessage, chunkedMessage) =>
                 {
