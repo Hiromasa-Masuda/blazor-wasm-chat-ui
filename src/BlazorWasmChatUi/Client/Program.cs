@@ -1,5 +1,5 @@
-using BlazorWasmChatUi.Client;
 using BlazorWasmChatUi.Client.Services;
+using Markdig;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 
@@ -15,6 +15,12 @@ public class Program
 
         builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(builder.HostEnvironment.BaseAddress) });
         builder.Services.AddScoped<OpenAiModelService>();
+
+        builder.Services.AddSingleton(sp => 
+            new MarkdownPipelineBuilder()
+            .UseAdvancedExtensions()
+            .Build());
+
 
         await builder.Build().RunAsync();
     }

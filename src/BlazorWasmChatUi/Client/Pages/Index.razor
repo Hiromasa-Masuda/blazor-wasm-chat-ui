@@ -3,6 +3,7 @@
 @using BlazorWasmChatUi.Shared;
 @implements IDisposable
 @inject OpenAiModelService _openAiService
+@inject Markdig.MarkdownPipeline _markdownPipeline
 @inject IJSRuntime _jsRuntime
 @inject IConfiguration _configuration
 @inject ILogger<Index> _logger
@@ -231,7 +232,7 @@
                     {
                         _currentChatContext.Messages.Add(chatMessage);
                     }
-                    
+
                     this.StateHasChanged();
 
                     replyMessage = chatMessage;
@@ -239,14 +240,14 @@
                 33,
                 cancellationToken);
             }
-            
+
             // 最初のユーザーメッセージでコンテキストのタイトルを初期化
             _currentChatContext.Title ??= messages?.FirstOrDefault(m => m.Role == "user")?.Content;
             // 生成された時間で、コンテキストの更新時間を更新
             _currentChatContext.UpdatedDateTime = replyMessage.CreatedDateTime;
             // トピックを保存
             await _openAiService.SaveTopicAsync(_currentChatContext, cancellationToken);
-        
+
         }
         catch(Exception e)
         {
@@ -281,7 +282,10 @@
             return string.Empty;
         }
 
-        return Markdig.Markdown.ToHtml(content);
+        var html = Markdig.Markdown.ToHtml(content, _markdownPipeline);
+        html = html?.Replace("<table>", "<table class=\"table table-bordered\">");
+
+        return html ?? string.Empty;
     }
 
     private async Task ScrollToBottom()
