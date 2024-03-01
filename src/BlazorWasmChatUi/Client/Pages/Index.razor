@@ -43,7 +43,7 @@
                 }
             }
 
-            @if (_isLoading)
+            @if (_isLoading && _currentChatContext == _renderingChatContext)
             {
                 <div class="row justify-content-center me-5">
                     <div class="col-auto rounded border">
@@ -120,6 +120,7 @@
 
 @code {
     private ChatContext? _currentChatContext { get; set; }
+    private ChatContext? _renderingChatContext { get; set; }
     private List<ChatContext>? _topics { get; set; }
     private CancellationTokenSource _cancellationTokenSource = new();
 
@@ -187,8 +188,11 @@
             _topics?.Insert(0, _currentChatContext);
         }
 
+        // カレントトピックを描画中のトピックとして保存
+        _renderingChatContext = _currentChatContext;
+
         // ユーザーメッセージを追加
-        _currentChatContext.Messages?.Add(new ChatMessage()
+        _renderingChatContext.Messages?.Add(new ChatMessage()
         { 
             Id = Guid.NewGuid().ToString(),
             Content = userMessage,
@@ -210,23 +214,23 @@
 
         try
         {
-            var messages = _currentChatContext.Messages.Where(m => m.Role != "loading").ToArray();
+            var messages = _renderingChatContext.Messages.Where(m => m.Role != "loading").ToArray();
 
             if (!_isStreamingResponseEnabled)
             {
                 replyMessage = await _openAiService.PostAsync(messages, cancellationToken);
 
                 // 生成されたメッセージの追加
-                _currentChatContext.Messages.Add(replyMessage);
+                _renderingChatContext.Messages.Add(replyMessage);
             }
             else
             {
                 await _openAiService.PostStreamingAsync(messages,
                 (chatMessage, chunkedMessage) =>
                 {
-                    if (!this._currentChatContext.Messages.Contains(chatMessage))
+                    if (!_renderingChatContext.Messages.Contains(chatMessage))
                     {
-                        _currentChatContext.Messages.Add(chatMessage);
+                        _renderingChatContext.Messages.Add(chatMessage);
                     }
 
                     this.StateHasChanged();
@@ -238,12 +242,11 @@
             }
 
             // 最初のユーザーメッセージでコンテキストのタイトルを初期化
-            _currentChatContext.Title ??= messages?.FirstOrDefault(m => m.Role == "user")?.Content;
+            _renderingChatContext.Title ??= messages?.FirstOrDefault(m => m.Role == "user")?.Content;
             // 生成された時間で、コンテキストの更新時間を更新
-            _currentChatContext.UpdatedDateTime = replyMessage.CreatedDateTime;
+            _renderingChatContext.UpdatedDateTime = replyMessage.CreatedDateTime;
             // トピックを保存
-            await _openAiService.SaveTopicAsync(_currentChatContext, cancellationToken);
-
+            await _openAiService.SaveTopicAsync(_renderingChatContext, cancellationToken);
         }
         catch(Exception e)
         {
@@ -253,6 +256,8 @@
         {
             _logger.LogInformation("replyMessage.Content = {Content}", replyMessage?.Content);
             _isLoading = false;
+            // 描画終了時に、初期化
+            _renderingChatContext = null;
         }
 
         this.StateHasChanged();
