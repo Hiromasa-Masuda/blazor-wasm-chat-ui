@@ -1,6 +1,7 @@
 ﻿using BlazorWasmChatUi.Shared;
 using Microsoft.AspNetCore.Components.WebAssembly.Http;
 using System.Net.Http.Json;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -83,13 +84,18 @@ public class OpenAiModelService
 
     public async Task PostStreamingAsync(ChatMessage[] messages, Action<ChatMessage, string?> onReadStream, int readingMillisecondsDelay, CancellationToken cancellationToken)
 	{
+        if (_httpClient.BaseAddress == null)
+        {
+            throw new InvalidOperationException("The BaseAddress of HttpClient is null.");
+        }
+
 		var json = JsonSerializer.Serialize(messages);
 
         HttpRequestMessage httpRequestMessage = new()
         {
             Content = new StringContent(json, Encoding.UTF8, "application/json"),
             Method = HttpMethod.Post,
-            RequestUri = new Uri(_httpClient.BaseAddress, "openaimodel/streaming"),            
+            RequestUri = new Uri(_httpClient.BaseAddress, "openaimodel/streaming"),
         };
 
         httpRequestMessage.SetBrowserResponseStreamingEnabled(true);
@@ -102,7 +108,7 @@ public class OpenAiModelService
         }
         catch (Exception ex) 
         {
-            _logger.LogError(ex.ToString());
+            _logger.LogError(ex, "An error occurred while sending the HTTP request.");
             throw;
         }
 
@@ -111,18 +117,47 @@ public class OpenAiModelService
             throw new HttpRequestException($"Response status code does not indicate success: {(int)response.StatusCode} ({response.ReasonPhrase}).");
         }
 
-        Stream responseStream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-
         ChatMessage chatMessage = new()
         {
             Content = string.Empty,
         };
 
+        await foreach (var jsonNode in
+            ReadSseStreamingAsync(response, cancellationToken)
+            .ConfigureAwait(false))
+        {
+            if (jsonNode == null)
+            {
+                continue;
+            }
+
+            chatMessage.Id = jsonNode["id"]?.GetValue<string>();
+            chatMessage.Role = jsonNode["role"]?.GetValue<string>();            
+            chatMessage.CreatedDateTime = jsonNode["createdDateTime"]?.GetValue<DateTimeOffset>();
+
+            var chunkedContent = jsonNode["content"]?.GetValue<string>();
+            chatMessage.Content += chunkedContent;
+
+            if (chatMessage is not { Id: null, Role: null, CreatedDateTime: null })
+            {
+                onReadStream.Invoke(chatMessage, chunkedContent);
+            }
+
+            await Task.Delay(readingMillisecondsDelay).ConfigureAwait(false);
+        }        
+    }
+
+    private async IAsyncEnumerable<JsonNode?> ReadSseStreamingAsync(
+        HttpResponseMessage httpResponseMessage,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        Stream responseStream = await httpResponseMessage.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+
         using (var streamReader = new StreamReader(responseStream))
         {
             while (!cancellationToken.IsCancellationRequested)
             {
-                var line = await streamReader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+                var line = await streamReader.ReadLineAsync().ConfigureAwait(false);
 
                 if (string.IsNullOrEmpty(line))
                 {
@@ -135,25 +170,9 @@ public class OpenAiModelService
                 else if (line.StartsWith("data: "))
                 {
                     var body = line.Substring(6, line.Length - 6);
-                    var jsonNode = JsonSerializer.Deserialize<JsonNode>(body);
-                    var id = jsonNode?["id"]?.GetValue<string>();
-                    var role = jsonNode?["role"]?.GetValue<string>();
-                    var chunkedContent = jsonNode?["content"]?.GetValue<string>();
-                    var createdDateTime = jsonNode?["createdDateTime"]?.GetValue<DateTimeOffset>();                    
-
-                    chatMessage.Id = id;
-                    chatMessage.Role = role;
-                    chatMessage.CreatedDateTime = createdDateTime ?? default;
-                    chatMessage.Content += chunkedContent;
-                    
-                    if (chatMessage is not { Id: null, Role: null, CreatedDateTime: DateTimeOffset })
-                    {
-                        onReadStream(chatMessage, chunkedContent);
-                    }
+                    yield return JsonSerializer.Deserialize<JsonNode>(body);
                 }
-
-                await Task.Delay(readingMillisecondsDelay);
             }
-        }
-	}
+        };
+    }
 }
